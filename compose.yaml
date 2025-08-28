@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: docker/production/app/Dockerfile
+    container_name: flip-catalog-parser-app
+    ports:
+      - "8000:8000"
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    depends_on:
+      - database
+      - selenium
+    env_file:
+      - .env
+    environment:
+      POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@database:5432/${POSTGRES_DB}
+      MODE: production
+    
+  database:
+    image: postgres:16
+    container_name: flip-catalog-parser-database
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgresql_data:/var/lib/postgresql/data/
+    env_file:
+      - .env
+
+  selenium:
+    image: selenium/standalone-chrome:latest
+    container_name: flip-catalog-parser-selenium
+    shm_size: 2g
+    ports:
+      - "4444:4444"
+      - "7900:7900"
+
+volumes:
+  postgresql_data:

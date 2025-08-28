@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: docker/development/app/Dockerfile
+    command: tail -f /dev/null
+    volumes:
+      - .:/flip_catalog_parser:cached
+    environment:
+      MODE: development
