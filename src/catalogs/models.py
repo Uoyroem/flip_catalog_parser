@@ -13,7 +13,7 @@ class Catalog(Base):
     __tablename__ = "catalogs"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    code: Mapped[str] = mapped_column(unique=True, index=True, nullable=False)
+    code: Mapped[int] = mapped_column(unique=True, index=True, nullable=False)
     name: Mapped[str] = mapped_column(String(150), nullable=False)
     parent_id: Mapped[int | None] = mapped_column(ForeignKey("catalogs.id"))
 

@@ -6,6 +6,8 @@ services:
       context: .
       dockerfile: docker/development/app/Dockerfile
     command: tail -f /dev/null
+    ports:
+      - "5900:5900"
     volumes:
       - .:/flip_catalog_parser:cached
     environment:

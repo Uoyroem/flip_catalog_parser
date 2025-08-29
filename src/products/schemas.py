@@ -7,6 +7,7 @@ from ..schemas import BaseSchema
 
 class ProductImageBase(BaseSchema):
     url: str
+    description: str
 
 
 class ProductImageCreate(ProductImageBase):
@@ -21,7 +22,7 @@ class ProductImage(ProductImageBase):
 
 
 class ProductBase(BaseSchema):
-    code: str
+    code: int
     name: str
     description: str | None = None
     price: Decimal

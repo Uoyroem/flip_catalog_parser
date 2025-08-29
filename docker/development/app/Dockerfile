@@ -6,13 +6,28 @@ ENV SCREEN_GEOMETRY="1280x720x24"
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    rm -f /etc/apt/apt.conf.d/docker-clean; echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends wget curl xvfb fluxbox x11vnc \
-    && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \ 
-    && echo "deb http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list \
-    && apt-get update \
-    && apt-get -y install google-chrome-stable 
+    apt update && \
+    apt install -y --no-install-recommends gnupg curl wget tigervnc-standalone-server tigervnc-common && \
+    curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome-keyring.gpg && \
+    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list && \
+    apt update && \
+    apt install -y --no-install-recommends google-chrome-stable \ 
+    tigervnc-standalone-server \
+    xfce4 \
+    xfce4-goodies \
+    dbus-x11 \
+    sudo && \
+    useradd -m -s /bin/bash dev && \
+    adduser dev sudo && \
+    echo "dev ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+USER dev
+
+RUN mkdir -p /home/dev/.vnc /home/dev/.config/tigervnc && \
+    echo "#!/bin/bash\n\
+xrdb \$HOME/.Xresources\n\
+startxfce4 &\n" > /home/dev/.vnc/xstartup && \
+    chmod +x /home/dev/.vnc/xstartup
 
 WORKDIR /flip_catalog_parser
 

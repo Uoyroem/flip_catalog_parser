@@ -4,7 +4,7 @@ from ..schemas import BaseSchema
 
 
 class CatalogBase(BaseSchema):
-    code: str
+    code: int
     name: str
     parent_id: int | None = None
 

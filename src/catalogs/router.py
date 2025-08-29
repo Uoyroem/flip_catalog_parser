@@ -34,7 +34,7 @@ async def read_catalog(
     catalog_id: int,
     async_session: AsyncSession = Depends(get_async_session),
 ):
-    db_catalog = await service.get_catalog(async_session, catalog_id=catalog_id)
+    db_catalog = await service.get_catalog_by_id(async_session, id=catalog_id)
     if db_catalog is None:
         raise HTTPException(status_code=404, detail="Catalog not found")
     return db_catalog
@@ -46,8 +46,8 @@ async def update_catalog(
     catalog_in: schemas.CatalogUpdate,
     async_session: AsyncSession = Depends(get_async_session),
 ):
-    updated_catalog = await service.update_catalog(
-        async_session, catalog_id=catalog_id, catalog_in=catalog_in
+    updated_catalog = await service.update_catalog_by_id(
+        async_session, id=catalog_id, catalog_in=catalog_in
     )
     if updated_catalog is None:
         raise HTTPException(status_code=404, detail="Catalog not found")
@@ -59,7 +59,7 @@ async def delete_catalog(
     catalog_id: int,
     async_session: AsyncSession = Depends(get_async_session),
 ):
-    deleted_catalog = await service.delete_catalog(async_session, catalog_id=catalog_id)
+    deleted_catalog = await service.delete_catalog_by_id(async_session, id=catalog_id)
     if deleted_catalog is None:
         raise HTTPException(status_code=404, detail="Catalog not found")
     return {"ok": True}
@@ -82,5 +82,50 @@ async def parse_catalog_products_by_id(
     async_session: AsyncSession = Depends(get_async_session),
     driver: Chrome = Depends(get_driver),
 ):
-    await service.parse_catalog_products(driver, async_session, catalog_id, page, limit)
+    await service.upsert_parsed_catalog_products_by_id(
+        async_session=async_session,
+        driver=driver,
+        page=page,
+        limit=limit,
+        id=catalog_id,
+    )
+
+    return {"ok": True}
+
+
+@_router.post("/parse-products/by-code/{code}")
+async def parse_catalog_products_by_code(
+    code: int,
+    page: int = 1,
+    limit: int = 10,
+    async_session: AsyncSession = Depends(get_async_session),
+    driver: Chrome = Depends(get_driver),
+):
+    await service.upsert_parsed_catalog_products_by_code(
+        async_session=async_session,
+        driver=driver,
+        page=page,
+        limit=limit,
+        code=code,
+    )
+
+    return {"ok": True}
+
+
+@_router.post("/parse-products/by-url")
+async def parse_catalog_products_by_url(
+    url: str,
+    page: int = 1,
+    limit: int = 10,
+    async_session: AsyncSession = Depends(get_async_session),
+    driver: Chrome = Depends(get_driver),
+):
+    await service.upsert_parsed_catalog_products_by_url(
+        async_session=async_session,
+        driver=driver,
+        page=page,
+        limit=limit,
+        url=url,
+    )
+
     return {"ok": True}
