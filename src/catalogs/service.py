@@ -88,7 +88,7 @@ async def parse_breadcrumb_catalogs(driver: Chrome, /) -> ParsedBreadcrumbCatalo
             breadcrumb_catalogs_container = driver.find_element(By.CLASS_NAME, "krohi")
         except TimeoutException:
             raise CatalogParserError("Could not find breadcrumb trail")
-        
+
         try:
             breadcrumbs = breadcrumb_catalogs_container.find_elements(By.TAG_NAME, "a")
         except TimeoutException:
@@ -98,7 +98,9 @@ async def parse_breadcrumb_catalogs(driver: Chrome, /) -> ParsedBreadcrumbCatalo
         previous_code = None
         for breadcrumb in breadcrumbs:
             code = int(
-                parse_qs(urlparse(breadcrumb.get_attribute("href")).query)["subsection"][0]
+                parse_qs(urlparse(breadcrumb.get_attribute("href")).query)[
+                    "subsection"
+                ][0]
             )
             catalog_parent_map[code] = previous_code
             name = breadcrumb.get_attribute("title")
@@ -275,14 +277,14 @@ async def upsert_catalog_by_code(
     *,
     commit: bool = True,
 ):
-    db_catalog = await get_catalog_by_code(async_session, catalog_in.code)
-
-    if db_catalog:
+    try:
+        db_catalog = await get_catalog_by_code(async_session, catalog_in.code)
+    except NotFoundError:
+        db_catalog = models.Catalog(**catalog_in.model_dump())
+    else:
         update_data = catalog_in.model_dump(exclude_unset=True)
         for key, value in update_data.items():
             setattr(db_catalog, key, value)
-    else:
-        db_catalog = models.Catalog(**catalog_in.model_dump())
 
     async_session.add(db_catalog)
     if commit:

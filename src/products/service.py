@@ -173,9 +173,16 @@ async def upsert_product_by_code(
     *,
     commit: bool = True,
 ):
-    db_product = await get_product_by_code(async_session, product_in.code)
+    try:
 
-    if db_product:
+        db_product = await get_product_by_code(async_session, product_in.code)
+    except NotFoundError:
+        product_data = product_in.model_dump(exclude={"images"})
+        db_product = models.Product(**product_data)
+        if product_in.images:
+            for image_in in product_in.images:
+                db_product.images.append(models.ProductImage(**image_in.model_dump()))
+    else:
         update_data = product_in.model_dump(exclude={"images"})
         for key, value in update_data.items():
             setattr(db_product, key, value)
@@ -184,12 +191,7 @@ async def upsert_product_by_code(
         if product_in.images:
             for image_in in product_in.images:
                 db_product.images.append(models.ProductImage(**image_in.model_dump()))
-    else:
-        product_data = product_in.model_dump(exclude={"images"})
-        db_product = models.Product(**product_data)
-        if product_in.images:
-            for image_in in product_in.images:
-                db_product.images.append(models.ProductImage(**image_in.model_dump()))
+
     async_session.add(db_product)
     if commit:
         await async_session.commit()
