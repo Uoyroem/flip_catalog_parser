@@ -8,18 +8,23 @@
 Требование:
 - Docker
 
+Порты:
+- FastAPI App - 8000,
+- VNC Server - 5900.
+
 Копировать содержимое `.env.example` в файл `.env`, оно должно быть в корне проекта, если надо можно изменить.
 
 Сборка проекта:
 ```bash
 docker compose up --build --detach
 ```
+
 И затем надо применить миграций:
 ```bash
-alembic upgrade head
+docker exec -it flip-catalog-parser-app python -m alembic upgrade head
 ```
 
-Порты:
-- FastAPI App - 8000,
-- VNC Server - 5900.
-
+Тест:
+```bash
+docker exec -it flip-catalog-parser-app python -m pytest -v -s
+```
