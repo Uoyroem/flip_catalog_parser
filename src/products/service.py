@@ -10,6 +10,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from src.exceptions import NotFoundError
+from src.products.exceptions import ProductParserError
+
 from . import models, schemas
 
 if TYPE_CHECKING:
@@ -26,34 +29,43 @@ async def parse_product_by_code(
 ) -> ParsedProduct:
     from ..catalogs import service as catalog_service
 
-    driver.get(f"https://www.flip.kz/catalog?prod={code}")
-    wait = WebDriverWait(driver, 5)
-    info_container = wait.until(visibility_of_element_located((By.ID, "prod")))
-    images_container = info_container.find_element(By.CLASS_NAME, "prod_img")
-    data_container = images_container.find_element(By.XPATH, "following-sibling::*[1]")
-    name = data_container.find_element(By.TAG_NAME, "h1").text
-    description = data_container.find_element(By.TAG_NAME, "p").text or None
-    price = Decimal(
-        "".join(
-            filter(
-                str.isdigit,
-                "".join(
-                    data_container.find_element(By.CLASS_NAME, "text_att").text.split()
-                ),
+    try:
+        driver.get(f"https://www.flip.kz/catalog?prod={code}")
+        wait = WebDriverWait(driver, 5)
+        info_container = wait.until(visibility_of_element_located((By.ID, "prod")))
+        images_container = info_container.find_element(By.CLASS_NAME, "prod_img")
+        data_container = images_container.find_element(
+            By.XPATH, "following-sibling::*[1]"
+        )
+        name = data_container.find_element(By.TAG_NAME, "h1").text
+        description = data_container.find_element(By.TAG_NAME, "p").text or None
+        price = Decimal(
+            "".join(
+                filter(
+                    str.isdigit,
+                    "".join(
+                        data_container.find_element(
+                            By.CLASS_NAME, "text_att"
+                        ).text.split()
+                    ),
+                )
             )
         )
-    )
-    product = schemas.ProductCreate(
-        code=code, name=name, description=description, price=price, catalog_id=0
-    )
-    parsed_breadcrumb_catalogs = await catalog_service.parse_breadcrumb_catalogs(driver)
-    for image_element in images_container.find_elements(By.TAG_NAME, "img"):
-        url = image_element.get_attribute("src")
-        description = image_element.get_attribute("alt")
-        product.images.append(
-            schemas.ProductImageCreate(url=url, description=description)
+        product = schemas.ProductCreate(
+            code=code, name=name, description=description, price=price, catalog_id=0
         )
-    return ParsedProduct(parsed_breadcrumb_catalogs, product)
+        parsed_breadcrumb_catalogs = await catalog_service.parse_breadcrumb_catalogs(
+            driver
+        )
+        for image_element in images_container.find_elements(By.TAG_NAME, "img"):
+            url = image_element.get_attribute("src")
+            description = image_element.get_attribute("alt")
+            product.images.append(
+                schemas.ProductImageCreate(url=url, description=description)
+            )
+        return ParsedProduct(parsed_breadcrumb_catalogs, product)
+    except Exception as exception:
+        raise ProductParserError(f"Unexpected error: {exception}")
 
 
 async def parse_product_by_id(
@@ -61,7 +73,7 @@ async def parse_product_by_id(
 ) -> ParsedProduct:
     product = await get_product_by_id(async_session, id)
     if product is None:
-        raise
+        raise NotFoundError(f"Product with id {id} - not found")
     return await parse_product_by_code(
         driver=driver, async_session=async_session, code=product.code
     )
@@ -72,7 +84,7 @@ async def parse_product_by_url(
 ) -> ParsedProduct:
     code = parse_qs(urlparse(url).query).get("prod")
     if code is None:
-        raise
+        raise ProductParserError("There is no 'prod' in query parameters")
     return await parse_product_by_code(
         driver=driver, async_session=async_session, code=int(code[0])
     )
@@ -84,7 +96,10 @@ async def get_product_by_id(async_session: AsyncSession, id: int):
         .options(selectinload(models.Product.images))
         .where(models.Product.id == id)
     )
-    return result.scalars().first()
+    product = result.scalars().first()
+    if product is None:
+        raise NotFoundError
+    return product
 
 
 async def get_product_by_code(async_session: AsyncSession, code: int):
@@ -93,7 +108,10 @@ async def get_product_by_code(async_session: AsyncSession, code: int):
         .options(selectinload(models.Product.images))
         .where(models.Product.code == code)
     )
-    return result.scalars().first()
+    product = result.scalars().first()
+    if product is None:
+        raise NotFoundError
+    return product
 
 
 async def get_all_products(
@@ -150,7 +168,10 @@ async def delete_product_by_id(async_session: AsyncSession, id: int):
 
 
 async def upsert_product_by_code(
-    async_session: AsyncSession, product_in: schemas.ProductCreate, *, commit: bool = True
+    async_session: AsyncSession,
+    product_in: schemas.ProductCreate,
+    *,
+    commit: bool = True,
 ):
     db_product = await get_product_by_code(async_session, product_in.code)
 
@@ -186,10 +207,12 @@ async def upsert_parsed_product(
     catalogs = await catalog_service.upsert_parsed_breadcrumb_catalogs(
         async_session=async_session,
         parsed_breadcrumb_catalogs=parsed_product.parsed_breadcrumb_catalogs,
-        commit=False
+        commit=False,
     )
     product = parsed_product.product
-    product.catalog_id = catalogs[parsed_product.parsed_breadcrumb_catalogs.last_catalog_code].id
+    product.catalog_id = catalogs[
+        parsed_product.parsed_breadcrumb_catalogs.last_catalog_code
+    ].id
     return await upsert_product_by_code(async_session, product)
 
 
@@ -200,7 +223,7 @@ async def upsert_parsed_product_by_code(
         async_session=async_session,
         parsed_product=await parse_product_by_code(
             driver=driver, async_session=async_session, code=code
-        )
+        ),
     )
 
 
@@ -209,7 +232,9 @@ async def upsert_parsed_product_by_url(
 ) -> schemas.Product:
     return await upsert_parsed_product(
         async_session=async_session,
-        parsed_product=await parse_product_by_url(driver=driver, async_session=async_session, url=url)
+        parsed_product=await parse_product_by_url(
+            driver=driver, async_session=async_session, url=url
+        ),
     )
 
 
@@ -218,5 +243,7 @@ async def upsert_parsed_product_by_id(
 ) -> schemas.Product:
     return await upsert_parsed_product(
         async_session=async_session,
-        parsed_product=await parse_product_by_id(driver=driver, async_session=async_session, id=id)
+        parsed_product=await parse_product_by_id(
+            driver=driver, async_session=async_session, id=id
+        ),
     )

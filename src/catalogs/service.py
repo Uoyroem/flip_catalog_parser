@@ -6,8 +6,13 @@ from selenium.webdriver import Chrome
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.expected_conditions import visibility_of_element_located
 from selenium.webdriver.support.ui import WebDriverWait
+from selenium.common.exceptions import TimeoutException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import IntegrityError
+
+from src.catalogs.exceptions import CatalogParserError
+from src.exceptions import BadRequestError, ConflictError, NotFoundError
 
 from . import models, schemas
 
@@ -78,19 +83,30 @@ class ParsedBreadcrumbCatalogs(NamedTuple):
 
 
 async def parse_breadcrumb_catalogs(driver: Chrome, /) -> ParsedBreadcrumbCatalogs:
-    breadcrumb_catalogs_container = driver.find_element(By.CLASS_NAME, "krohi")
-    catalog_map = {}
-    catalog_parent_map = {}
-    previous_code = None
-    for breadcrumb in breadcrumb_catalogs_container.find_elements(By.TAG_NAME, "a"):
-        code = int(
-            parse_qs(urlparse(breadcrumb.get_attribute("href")).query)["subsection"][0]
-        )
-        catalog_parent_map[code] = previous_code
-        name = breadcrumb.get_attribute("title")
-        catalog_map[code] = schemas.CatalogCreate(code=code, name=name)
-        previous_code = code
-    return ParsedBreadcrumbCatalogs(catalog_map, catalog_parent_map, previous_code)
+    try:
+        try:
+            breadcrumb_catalogs_container = driver.find_element(By.CLASS_NAME, "krohi")
+        except TimeoutException:
+            raise CatalogParserError("Could not find breadcrumb trail")
+        
+        try:
+            breadcrumbs = breadcrumb_catalogs_container.find_elements(By.TAG_NAME, "a")
+        except TimeoutException:
+            raise CatalogParserError("Could not find links in breadcrumb")
+        catalog_map = {}
+        catalog_parent_map = {}
+        previous_code = None
+        for breadcrumb in breadcrumbs:
+            code = int(
+                parse_qs(urlparse(breadcrumb.get_attribute("href")).query)["subsection"][0]
+            )
+            catalog_parent_map[code] = previous_code
+            name = breadcrumb.get_attribute("title")
+            catalog_map[code] = schemas.CatalogCreate(code=code, name=name)
+            previous_code = code
+        return ParsedBreadcrumbCatalogs(catalog_map, catalog_parent_map, previous_code)
+    except Exception as exception:
+        raise CatalogParserError(f"Unexpected error: {exception}")
 
 
 class ParsedCatalogProducts(NamedTuple):
@@ -128,7 +144,6 @@ async def parse_catalog_products_by_code(
     product_catalog_map: dict[int, int] = {}
     products = []
     for product_code in product_codes:
-        print(product_code)
         parsed_product = await product_service.parse_product_by_code(
             driver=driver, async_session=async_session, code=product_code
         )
@@ -189,14 +204,20 @@ async def get_catalog_by_id(async_session: AsyncSession, id: int):
     result = await async_session.execute(
         select(models.Catalog).where(models.Catalog.id == id)
     )
-    return result.scalars().first()
+    catalog = result.scalars().first()
+    if catalog is None:
+        raise NotFoundError(f"Catalog with id {id} - not found")
+    return catalog
 
 
 async def get_catalog_by_code(async_session: AsyncSession, code: int):
     result = await async_session.execute(
         select(models.Catalog).where(models.Catalog.code == code)
     )
-    return result.scalars().first()
+    catalog = result.scalars().first()
+    if catalog is None:
+        raise NotFoundError(f"Catalog with code {code} - not found")
+    return catalog
 
 
 async def get_all_catalogs(
@@ -213,8 +234,13 @@ async def create_catalog(
 ):
     db_catalog = models.Catalog(**catalog_in.model_dump())
     async_session.add(db_catalog)
-    await async_session.commit()
-    await async_session.refresh(db_catalog)
+    try:
+        await async_session.commit()
+    except IntegrityError as integrity_error:
+        if integrity_error.code == "1063":
+            raise ConflictError
+    finally:
+        await async_session.refresh(db_catalog)
     return db_catalog
 
 
@@ -268,7 +294,9 @@ async def upsert_catalog_by_code(
 
 
 async def upsert_parsed_breadcrumb_catalogs(
-    async_session: AsyncSession, parsed_breadcrumb_catalogs: ParsedBreadcrumbCatalogs, commit: bool = True
+    async_session: AsyncSession,
+    parsed_breadcrumb_catalogs: ParsedBreadcrumbCatalogs,
+    commit: bool = True,
 ) -> dict[int, schemas.Catalog]:
     saved = {}
     for catalog in parsed_breadcrumb_catalogs.in_order():
@@ -353,11 +381,13 @@ async def upsert_parsed_catalog_products(
     catalogs = await upsert_parsed_breadcrumb_catalogs(
         async_session=async_session,
         parsed_breadcrumb_catalogs=parsed_catalog_products.parsed_breadcrumb_catalogs,
-        commit=False
+        commit=False,
     )
     for product in parsed_catalog_products.products:
         product.catalog_id = catalogs[
             parsed_catalog_products.product_catalog_map[product.code]
         ].id
-        await product_service.upsert_product_by_code(async_session, product, commit=False)
+        await product_service.upsert_product_by_code(
+            async_session, product, commit=False
+        )
     await async_session.commit()
