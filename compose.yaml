@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   app:
     build:
@@ -8,11 +6,13 @@ services:
     container_name: flip-catalog-parser-app
     ports:
       - "8000:8000"
+      - "5900:5900"
     depends_on:
       - database
     env_file:
       - .env
     environment:
+      VNC_PASSWORD: ${VNC_PASSWORD}
       POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@database:5432/${POSTGRES_DB}
       MODE: production
     
